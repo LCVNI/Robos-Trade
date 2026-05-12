@@ -22,27 +22,46 @@ double resistencia;
 double askant = 0; 
 double bidant = 0; 
 
+
+string Objname ="";
+int Borda = 50; //em pips!!!
+double  BordaSR = Borda  * Point;
+
+bool NovoSR = false;
+double MomentoRompimento = 0.0;
 //+------------------------------------------------------------------+
 //| Função de Inicialização - Criamos os objetos de linha aqui       |
 //+------------------------------------------------------------------+
 int OnInit()
 {
    suporte = Low[iLowest(NULL, 0, MODE_LOW, Periodo_SR, 1)];
-   
-   Print("PERIODO ANTERIOR[", Periodo_SR ,"]");  
-   Print("VELA MENOR[",iLowest(NULL, 0, MODE_LOW, Periodo_SR, 1) ,"]");  
-   
-    
    resistencia = High[iHighest(NULL, 0, MODE_HIGH, Periodo_SR, 1)];
-   // Cria a linha de Resistência (Azul)
-   ObjectCreate(0, "LinhaResistencia", OBJ_HLINE, 0, 0, resistencia);
-   ObjectSetInteger(0, "LinhaResistencia", OBJPROP_COLOR, clrDodgerBlue);
-   ObjectSetInteger(0, "LinhaResistencia", OBJPROP_WIDTH, 2);
+ 
+   Objname = "LinhaResistencia";
+   ObjectCreate(0, Objname, OBJ_HLINE, 0, 0, resistencia);
+   ObjectSetInteger(0, Objname, OBJPROP_COLOR, clrDodgerBlue);
+   ObjectSetInteger(0, Objname, OBJPROP_WIDTH, 2);
 
-   // Cria a linha de Suporte (Vermelha)
-   ObjectCreate(0, "LinhaSuporte", OBJ_HLINE, 0, 0, suporte);
-   ObjectSetInteger(0, "LinhaSuporte", OBJPROP_COLOR, clrTomato);
-   ObjectSetInteger(0, "LinhaSuporte", OBJPROP_WIDTH, 2);
+   Objname ="LinhaSuporte";
+   ObjectCreate(0, Objname, OBJ_HLINE, 0, 0, suporte);
+   ObjectSetInteger(0, Objname, OBJPROP_COLOR, clrTomato);
+   ObjectSetInteger(0, Objname, OBJPROP_WIDTH, 2);
+   
+   
+   
+   
+   Objname = "BordaResistencia";
+   ObjectCreate(0, Objname, OBJ_HLINE, 0, 0, resistencia - BordaSR);
+   ObjectSetInteger(0, Objname, OBJPROP_COLOR, clrLightBlue);
+   ObjectSetInteger(0, Objname, OBJPROP_WIDTH, 2);
+
+   Objname ="BordaSuporte";
+   ObjectCreate(0, Objname, OBJ_HLINE, 0, 0, suporte + BordaSR);
+   ObjectSetInteger(0, Objname, OBJPROP_COLOR, clrPink);
+   ObjectSetInteger(0, Objname, OBJPROP_WIDTH, 2);
+   
+   
+   
 
    return(INIT_SUCCEEDED);
 }
@@ -59,112 +78,94 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 //| Função Principal                                                 |
 //+------------------------------------------------------------------+
-void OnTick()
-{
-   // 1. Cálculo de Suporte e Resistência
-   
-   double distancia = DistToque * Point;
-   int idxMax = iHighest(NULL, 0, MODE_HIGH, Periodo_SR, 1);
-   int idxMin = iLowest(NULL, 0, MODE_LOW, Periodo_SR, 1);
-   
-   double rTemp = High[idxMax];
-   double sTemp = Low[idxMin];
-   
-   bool novoRs = false;
-   bool novoSp = false;
-   
-   int contToques = 0;
-   
-   for(int i = 1; i < Periodo_SR; i++){
-      if(MathAbs(High[i] - resistencia) <= distancia){
-         contToques++;
-      }
-      if(contToques == 3){
-         resistencia = rTemp;
-         novoRs = true;
-         break;
-      }
-   }
-   
-   //Loop para confirmar suporte
-   contToques = 0;
-   for(int i = 2; i < Periodo_SR; i++){
-      if(MathAbs(Low[i] - suporte) <= distancia){
-         contToques++;
-      }
-      if(contToques == 3){
-         suporte = sTemp;
-         novoSp = true;
-         break;
-      }
-   }
-   // 2. Atualiza a posição das linhas no gráfico visual
-   if(novoRs){
-      ObjectMove(0, "LinhaResistencia", 0, 0, resistencia);
-   }
-   
-   if(novoSp){
-      ObjectMove(0, "LinhaSuporte", 0, 0, suporte);
-   }
-   // 3. Filtro de Ordens
-
-   
-   if(OrdersTotal() > 0){
-      if(OrderSelect(0, SELECT_BY_POS, MODE_TRADES)){ // Seleciona a primeira ordem aberta
-        if(OrderType() == OP_BUY){ // Se for uma compra
-            if(Ask > askant && askant > 0){
-               double novoSL = Ask - (StopLoss * Point);
-               if(novoSL > OrderStopLoss()){
-                  bool mod = OrderModify(OrderTicket(), OrderOpenPrice(), novoSL, OrderTakeProfit(), 0, clrGreen);
-                  if(!mod) Print("Erro ao modificar SL: ", GetLastError());
-               }
-            }
-            askant = Ask; // Atualiza o preço anterior
+void OnTick(){
+     if (!NovoSR){
+         VerificaRompimento(suporte, resistencia); // Se houve ropimento do Suporte ou da Resistencia.
+         VerificaOperacao();//se é para vender ou para comprar.
+     }else{
+         if(((Time[0] - MomentoRompimento)>(PeriodSeconds(_Period) * 11))){
+            DesenharSR();
+            NovoSR = false;
          }
-         if(OrderType() == OP_SELL){ 
-               if(Bid < bidant && bidant > 0){
-                  double novoSL = Bid + (StopLoss * Point);
-                  if(OrderStopLoss() == 0 || novoSL < OrderStopLoss()){
-                     bool mod = OrderModify(OrderTicket(), OrderOpenPrice(), novoSL, OrderTakeProfit(), 0, clrRed);
-                     if(!mod) 
-                        Print("Erro ao modificar SL de Venda: ", GetLastError());
-                     else
-                        Print("SL de Venda movido para: ", novoSL);
+     }
+}
+void VerificaOperacao(){
+    if(OrdersTotal() > 0){
+         if(OrderSelect(0, SELECT_BY_POS, MODE_TRADES)){ // Seleciona a primeira ordem aberta
+           if(OrderType() == OP_BUY){ // Se for uma compra
+               if(Ask > askant && askant > 0){
+                  double novoSL = Ask - (StopLoss * Point);
+                  if(novoSL > OrderStopLoss()){
+                     bool mod = OrderModify(OrderTicket(), OrderOpenPrice(), novoSL, OrderTakeProfit(), 0, clrGreen);
+                     if(!mod) Print("Erro ao modificar SL: ", GetLastError());
                   }
                }
-               bidant = Bid; // Atualiza o rastro do preço
+               askant = Ask; // Atualiza o preço anterior
             }
+            if(OrderType() == OP_SELL){ 
+                  if(Bid < bidant && bidant > 0){
+                     double novoSL = Bid + (StopLoss * Point);
+                     if(OrderStopLoss() == 0 || novoSL < OrderStopLoss()){
+                        bool mod = OrderModify(OrderTicket(), OrderOpenPrice(), novoSL, OrderTakeProfit(), 0, clrRed);
+                        if(!mod) 
+                           Print("Erro ao modificar SL de Venda: ", GetLastError());
+                        else
+                           Print("SL de Venda movido para: ", novoSL);
+                     }
+                  }
+                  bidant = Bid; // Atualiza o rastro do preço
+               }
+        }
+     }else{
+         if( Bid > resistencia - BordaSR){
+            double sl = (StopLoss > 0) ? (Bid + StopLoss * Point) : 0;
+            double tp = (TakeProfit > 0) ? (Bid - TakeProfit * Point) : 0;
+            int ticket = OrderSend(Symbol(), OP_SELL, Lotes, Bid, 3, sl, tp, "Venda SR", MagicNumber, 0, clrRed);
+         }
+         if(Bid < (suporte + BordaSR)){
+            double sl = (StopLoss > 0) ? (Ask - StopLoss * Point) : 0;
+            double tp = (TakeProfit > 0) ? (Ask + TakeProfit * Point) : 0;
+            int ticket = OrderSend(Symbol(), OP_BUY, Lotes, Ask, 3, sl, tp, "Compra SR", MagicNumber, 0, clrBlue);
+         }
      }
-  }else{
-      int Borda = 50; //em pips!!!
-      double  BordaSR = Borda  * Point;
-      Print("Resistencia ...[",resistencia ,"]" );
-      Print("5% Resistencia.[", (resistencia - BordaSR) ,"]" );
-      Print("suporte .......[",suporte ,"]" );
-      Print("5% suporte.....[", (suporte+BordaSR) ,"]" );
-      Print("ASK............[",Ask ,"]" );
-      Print("BID............[",Bid ,"]" );
 
-      ObjectCreate(0, "BORDAR", OBJ_HLINE, 0, 0, resistencia - BordaSR);
-      ObjectSetInteger(0, "BORDAR", OBJPROP_COLOR, clrLightBlue);
-      ObjectSetInteger(0, "BORDAR", OBJPROP_WIDTH, 2);
-   
-      // Cria a linha de Suporte (Vermelha)
-      ObjectCreate(0, "BORDAS", OBJ_HLINE, 0, 0, suporte+BordaSR);
-      ObjectSetInteger(0, "BORDAS", OBJPROP_COLOR, clrPink);
-      ObjectSetInteger(0, "BORDAS", OBJPROP_WIDTH, 2);
+}
 
 
+void VerificaRompimento(double S, double R){
+     if ((Bid > R)||(Bid < S)){
+         NovoSR = true;
+         MomentoRompimento = Time[0];
+         RemoverLinhasSR();
+     }
+}
+void DesenharSR(){
+      suporte     = Low[iLowest(NULL, 0, MODE_LOW, Periodo_SR, 1)];
+      resistencia = High[iHighest(NULL, 0, MODE_HIGH, Periodo_SR, 1)];
+      //-------------------------------------------------------------
+      Objname = "LinhaSuporte";
+      ObjectMove(0, Objname, 0, 0, suporte);
+      Objname = "BordaSuporte";
+      ObjectMove(0, Objname, 0, 0, suporte + BordaSR);
       
-      if( Bid > resistencia - BordaSR){
-         double sl = (StopLoss > 0) ? (Bid + StopLoss * Point) : 0;
-         double tp = (TakeProfit > 0) ? (Bid - TakeProfit * Point) : 0;
-         int ticket = OrderSend(Symbol(), OP_SELL, Lotes, Bid, 3, sl, tp, "Venda SR", MagicNumber, 0, clrRed);
-      }
-      if(Bid < (suporte + BordaSR)){
-         double sl = (StopLoss > 0) ? (Ask - StopLoss * Point) : 0;
-         double tp = (TakeProfit > 0) ? (Ask + TakeProfit * Point) : 0;
-         int ticket = OrderSend(Symbol(), OP_BUY, Lotes, Ask, 3, sl, tp, "Compra SR", MagicNumber, 0, clrBlue);
-      }
-  }
+      
+      //-------------------------------------------------------------
+      Objname = "LinhaResistencia";
+      ObjectMove(0, Objname, 0, 0, resistencia);
+      Objname = "BordaResistencia";
+      ObjectMove(0, Objname, 0, 0, resistencia - BordaSR);
+}
+
+void RemoverLinhasSR(){
+      Objname = "LinhaSuporte";
+      ObjectMove(0, Objname, 0, 0, 0);
+      Objname = "BordaSuporte";
+      ObjectMove(0, Objname, 0, 0, 0);
+      
+      
+      //-------------------------------------------------------------
+      Objname = "LinhaResistencia";
+      ObjectMove(0, Objname, 0, 0, 0);
+      Objname = "BordaResistencia";
+      ObjectMove(0, Objname, 0, 0, 0);
 }
